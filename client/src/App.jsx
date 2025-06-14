@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import ChatBubble from './components/ChatBubble';
-import ChatDialog from './components/ChatDialog';
+import ChatDialog from './components/chatDialog';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
