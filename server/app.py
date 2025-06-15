@@ -11,6 +11,11 @@ import re
 from typing import Dict, List, Optional
 import threading
 from functools import lru_cache
+import requests
+from bs4 import BeautifulSoup
+import os
+import time
+
 
 # Load environment variables
 load_dotenv()
@@ -86,6 +91,40 @@ PRESET_QA = {
     }
 }
 }
+def get_cached_college_content():
+    cache_file = "college_cache.txt"
+    cache_duration = 86400  # 24 hours
+
+    if os.path.exists(cache_file):
+        modified_time = os.path.getmtime(cache_file)
+        if time.time() - modified_time < cache_duration:
+            with open(cache_file, "r", encoding="utf-8") as f:
+                return f.read()
+
+    urls = [
+        "https://moderncollegepune.edu.in",
+        "https://moderncollegepune.edu.in/admission",
+        "https://moderncollegepune.edu.in/academics",
+        "https://moderncollegepune.edu.in/student-corner",
+    ]
+
+    content = ""
+    for url in urls:
+        try:
+            response = requests.get(url, timeout=10)
+            soup = BeautifulSoup(response.text, "html.parser")
+            for tag in soup(["script", "style", "noscript"]):
+                tag.decompose()
+            content += soup.get_text(separator=" ", strip=True) + "\n\n"
+        except Exception as e:
+            content += f"Error fetching {url}: {e}\n\n"
+
+    # Save to cache
+    with open(cache_file, "w", encoding="utf-8") as f:
+        f.write(content)
+
+    return content
+
 
 def classify_role(message: str) -> str:
     """Basic keyword-based role classifier."""
