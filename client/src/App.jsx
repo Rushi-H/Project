@@ -1,10 +1,10 @@
+// ✅ Fix: Removed duplicate `playNotificationSound` and added repeat message handling.
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import ChatBubble from './components/chatBubble';
 import ChatDialog from './components/chatDialog';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
-// Custom hooks for better state management
 const useLocalStorage = (key, defaultValue) => {
   const [value, setValue] = useState(() => {
     try {
@@ -38,16 +38,14 @@ const useChatAPI = () => {
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
 
       const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/chat`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           message: message.trim(),
-          role: role,
+          role,
           timestamp: new Date().toISOString()
         }),
         signal: controller.signal,
@@ -55,13 +53,10 @@ const useChatAPI = () => {
 
       clearTimeout(timeoutId);
 
-      if (!response.ok) {
-        throw new Error(`Server error: ${response.status} ${response.statusText}`);
-      }
+      if (!response.ok) throw new Error(`Server error: ${response.status} ${response.statusText}`);
 
       const data = await response.json();
       setConnectionStatus('connected');
-      
       return {
         text: data.response,
         role: data.detected_role,
@@ -70,7 +65,6 @@ const useChatAPI = () => {
       };
     } catch (error) {
       setConnectionStatus('error');
-      
       if (error.name === 'AbortError') {
         throw new Error('Request timed out. Please try again.');
       } else if (!navigator.onLine) {
@@ -96,33 +90,24 @@ function App() {
     soundEnabled: true,
     theme: 'light'
   });
-  
+
+  const [repeatCount, setRepeatCount] = useState(0);
   const dialogRef = useRef(null);
   const { sendMessage, isLoading, connectionStatus } = useChatAPI();
-  
-  // Notification sound
-  const playNotificationSound = useCallback(() => {
-    if (chatSettings.soundEnabled) {
-      const audio = new Audio('/notification.mp3'); // Add this file to public folder
-      audio.volume = 0.3;
-      audio.play().catch(() => {}); // Ignore errors if sound fails
-    }
+
+  const playNotificationSound = useCallback((text = '') => {
+    if (!chatSettings.soundEnabled) return;
+    const isBassKar = text.toLowerCase().includes("bass kar na");
+    const audio = new Audio(isBassKar ? '/bass-kar-na.mp3' : '/notification.mp3');
+    audio.volume = 0.4;
+    audio.play().catch(() => {});
   }, [chatSettings.soundEnabled]);
 
-  // Auto-scroll and focus management
   useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = 'hidden'; // Prevent background scroll on mobile
-    } else {
-      document.body.style.overflow = 'unset';
-    }
-
-    return () => {
-      document.body.style.overflow = 'unset';
-    };
+    document.body.style.overflow = isOpen ? 'hidden' : 'unset';
+    return () => { document.body.style.overflow = 'unset'; };
   }, [isOpen]);
 
-  // Close dialog when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (dialogRef.current && !dialogRef.current.contains(event.target) && isOpen) {
@@ -134,28 +119,23 @@ function App() {
     };
 
     const handleEscapeKey = (event) => {
-      if (event.key === 'Escape' && isOpen) {
-        setIsOpen(false);
-      }
+      if (event.key === 'Escape' && isOpen) setIsOpen(false);
     };
 
     document.addEventListener('mousedown', handleClickOutside);
     document.addEventListener('keydown', handleEscapeKey);
-    
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('keydown', handleEscapeKey);
     };
   }, [isOpen]);
 
-  // Connection status monitoring
   useEffect(() => {
     const handleOnline = () => toast.success('Connection restored!');
     const handleOffline = () => toast.error('Connection lost. Please check your internet.');
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
-
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
@@ -164,16 +144,12 @@ function App() {
 
   const toggleChatDialog = useCallback(() => {
     setIsOpen(prev => !prev);
-    if (!isOpen) {
-      // Add welcome message for first-time users
-      if (messages.length === 0) {
-        const welcomeMessage = {
-          text: "👋 Welcome to Modern College Pune! I'm here to help you with admissions, courses, and general information. How can I assist you today?",
-          sender: 'bot',
-          timestamp: new Date().toISOString(),
-        };
-        setMessages([welcomeMessage]);
-      }
+    if (!isOpen && messages.length === 0) {
+      setMessages([{
+        text: "👋 Welcome to Modern College Pune! I'm here to help you with admissions, courses, and general information. How can I assist you today?",
+        sender: 'bot',
+        timestamp: new Date().toISOString(),
+      }]);
     }
   }, [isOpen, messages.length, setMessages]);
 
@@ -185,20 +161,32 @@ function App() {
     const messageToSend = customMessage !== undefined ? customMessage : inputValue;
     if (!messageToSend.trim()) return;
 
+    const lastTwo = messages.slice(-2).map(msg => msg.text.toLowerCase());
+    const currentMsg = messageToSend.trim().toLowerCase();
+    const repeated = lastTwo.every(msg => msg === currentMsg);
+
     const userMessage = {
       text: messageToSend,
       sender: 'user',
       timestamp: new Date().toISOString(),
     };
 
-
-    
-    setMessages(prevMessages => [...prevMessages, userMessage]);
+    setMessages(prev => [...prev, userMessage]);
     setInputValue('');
+
+    if (repeated) {
+      const botMessage = {
+        text: "😅 Bass Kar Na Bhai Pudhe BoL !!!!!!!",
+        sender: 'bot',
+        timestamp: new Date().toISOString(),
+      };
+      setMessages(prev => [...prev, botMessage]);
+      playNotificationSound(botMessage.text);
+      return;
+    }
 
     try {
       const botResponse = await sendMessage(messageToSend, userRole);
-      
       const botMessage = {
         text: botResponse.text,
         sender: 'bot',
@@ -206,38 +194,27 @@ function App() {
         role: botResponse.role,
         confidence: botResponse.confidence,
       };
+      setMessages(prev => [...prev, botMessage]);
+      playNotificationSound(botResponse.text);
 
-      setMessages(prevMessages => [...prevMessages, botMessage]);
-      
-      // Play notification sound for bot responses
-      playNotificationSound();
-      
-      // Show toast for role detection
       if (botResponse.role && botResponse.role !== userRole) {
         toast.info(`Detected context: ${botResponse.role}`, {
-          position: "top-right",
+          position: 'top-right',
           autoClose: 3000,
         });
       }
-
     } catch (error) {
       console.error('Error sending message:', error);
-      
       const errorMessage = {
         text: error.message || 'Sorry, I encountered an error. Please try again later.',
         sender: 'bot',
         timestamp: new Date().toISOString(),
         isError: true,
       };
-      
-      setMessages(prevMessages => [...prevMessages, errorMessage]);
-      
-      toast.error(error.message, {
-        position: "top-right",
-        autoClose: 5000,
-      });
+      setMessages(prev => [...prev, errorMessage]);
+      toast.error(error.message, { position: 'top-right', autoClose: 5000 });
     }
-  }, [inputValue, userRole, sendMessage, setMessages, playNotificationSound]);
+  }, [inputValue, userRole, messages, sendMessage, setMessages, playNotificationSound]);
 
   const handleKeyPress = useCallback((e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -257,7 +234,6 @@ function App() {
       exportDate: new Date().toISOString(),
       userRole,
     };
-    
     const blob = new Blob([JSON.stringify(chatData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -265,48 +241,29 @@ function App() {
     a.download = `chat-history-${new Date().toISOString().split('T')[0]}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    
     toast.success('Chat history exported!');
   }, [messages, userRole]);
 
   return (
     <div
       className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50 relative"
-      style={{
-        backgroundImage: 'url(/image.png)',
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat',
-      }}
+      style={{ backgroundImage: 'url(/image.png)', backgroundSize: 'cover', backgroundPosition: 'center', backgroundRepeat: 'no-repeat' }}
     >
-      {/* Background overlay for better contrast */}
       <div className="absolute inset-0 bg-white/70 backdrop-blur-sm"></div>
-      
-      {/* Connection status indicator */}
       {connectionStatus === 'error' && (
         <div className="fixed top-4 left-1/2 transform -translate-x-1/2 bg-red-500 text-white px-4 py-2 rounded-full text-sm font-medium shadow-lg z-50">
           Connection Error
         </div>
       )}
-
-      {/* Main content area - you can add your college website content here */}
       <div className="relative z-10 p-8">
         <div className="max-w-6xl mx-auto">
           <h1 className="text-4xl font-bold text-gray-800 mb-4">Modern College Pune</h1>
           <p className="text-lg text-gray-600">Excellence in Education Since 1959</p>
         </div>
       </div>
-
-      {/* Chatbot UI */}
-      <ChatBubble 
-        isOpen={isOpen} 
-        onClick={toggleChatDialog}
-        hasUnreadMessages={false} // You can implement this feature
-        connectionStatus={connectionStatus}
-      />
-      
+      <ChatBubble isOpen={isOpen} onClick={toggleChatDialog} hasUnreadMessages={false} connectionStatus={connectionStatus} />
       {isOpen && (
-        <ChatDialog   
+        <ChatDialog
           ref={dialogRef}
           messages={messages}
           inputValue={inputValue}
@@ -323,8 +280,6 @@ function App() {
           connectionStatus={connectionStatus}
         />
       )}
-
-      {/* Toast notifications */}
       <ToastContainer
         position="top-right"
         autoClose={3000}
