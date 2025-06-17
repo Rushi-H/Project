@@ -1,26 +1,18 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
-from dotenv import load_dotenv
-import google.generativeai as genai
-import logging
-import time
 import requests
+import time
 from bs4 import BeautifulSoup
+import google.generativeai as genai
 
-# Load .env variables
-load_dotenv()
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-genai.configure(api_key=GEMINI_API_KEY)
+# Configure Gemini API key
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 app = Flask(__name__)
 CORS(app)
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-
-# --- Scraper & Caching Logic --- #
+# Scrape and cache content from college website
 def get_cached_college_content():
     cache_file = "college_cache.txt"
     cache_duration = 86400  # 24 hours
@@ -35,72 +27,66 @@ def get_cached_college_content():
         "https://moderncollegepune.edu.in/admission",
         "https://moderncollegepune.edu.in/academics",
         "https://moderncollegepune.edu.in/student-corner",
+        "https://moderncollegepune.edu.in/contact",  # added contact page
     ]
 
     content = ""
     for url in urls:
         try:
-            response = requests.get(url, timeout=10)
-            soup = BeautifulSoup(response.text, "html.parser")
+            res = requests.get(url, timeout=10)
+            soup = BeautifulSoup(res.text, "html.parser")
             for tag in soup(["script", "style", "noscript"]):
                 tag.decompose()
             content += soup.get_text(separator=" ", strip=True) + "\n\n"
-        except Exception as e:
-            content += f"Error fetching {url}: {e}\n\n"
+        except:
+            pass
 
     with open(cache_file, "w", encoding="utf-8") as f:
         f.write(content)
 
     return content
 
-
-# --- Role Classifier --- #
-def classify_role(message: str) -> str:
-    msg = message.lower()
-    if any(word in msg for word in ["admission", "exam", "student login", "course", "library", "timetable"]):
+# Classify user role based on message
+def classify_role(msg):
+    msg = msg.lower()
+    if any(w in msg for w in ["admission", "exam", "login", "course", "library", "timetable"]):
         return "student"
-    elif any(word in msg for word in ["faculty", "teacher", "staff login", "circular", "announcement", "fdp"]):
+    elif any(w in msg for w in ["faculty", "teacher", "staff", "circular", "fdp"]):
         return "teacher"
-    elif any(word in msg for word in ["parent", "track student", "performance", "contact faculty", "hostel"]):
+    elif any(w in msg for w in ["parent", "track", "performance", "hostel"]):
         return "parent"
-    else:
-        return "general"
+    return "general"
 
-
-# --- Gemini Chat API --- #
+# Chat endpoint
 @app.route("/api/chat", methods=["POST"])
 def chat():
     data = request.get_json()
     user_msg = data.get("message", "")
     role = data.get("role") or classify_role(user_msg)
 
-    logger.info(f"User message: {user_msg} | Role: {role}")
+    context = get_cached_college_content()[:8000]
 
-    # Get website context
-    context = get_cached_college_content()
-    trimmed_context = context[:8000]  # token safe
-
-    prompt_parts = [
-        "You are an AI assistant for Modern College Pune.",
-        "Use only this college information for answering:",
-        trimmed_context,
-        f"User asked: {user_msg}",
-        "Respond briefly and factually based on context only."
+    prompt = [
+        "You are an AI assistant for Modern College of Arts, Science and Commerce, Shivajinagar, Pune.",
+        "College Website: https://moderncollegepune.edu.in",
+        "Use the following content from the college website to answer the user's query.",
+        "Only provide answers that are based on the information below:",
+        context,
+        f"The user asked: {user_msg}",
+        "Respond clearly, accurately, and briefly using only the provided college information."
     ]
 
     try:
         model = genai.GenerativeModel("models/gemini-1.5-flash")
-        response = model.generate_content(prompt_parts)
+        response = model.generate_content(prompt)
         reply = response.text.strip()
     except Exception as e:
-        reply = f"Sorry, something went wrong. ({str(e)})"
+        reply = "Sorry, something went wrong."
 
     return jsonify({
         "response": reply,
-        "detected_role": role,
-        "confidence": None
+        "detected_role": role
     })
-
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
